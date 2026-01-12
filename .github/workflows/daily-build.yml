@@ -40,11 +40,43 @@ jobs:
             ghcr.io/${{ github.repository }}:${{ github.sha }}
             ghcr.io/${{ github.repository }}:production-smb-${{ env.IMAGE_DATE }}
 
-      - name: Cleanup old images
-        uses: snok/container-retention-policy@v2
-        with:
-          image-names: ${{ github.event.repository.name }}
-          cut-off: '60 days ago UTC'
-          account-type: org
-          org-name: ${{ github.repository_owner }}
-          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Cleanup old container images
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -x
+          OWNER="${{ github.repository_owner }}"
+          PACKAGE_NAME="${{ github.event.repository.name }}"
+          
+          echo "Listing versions for package '$PACKAGE_NAME' owned by '$OWNER'"
+          
+          # Get all versions, extracting id, created_at, and tags.
+          # The || true is to prevent the script from exiting if no versions are found (which returns a non-zero exit code from gh api).
+          VERSIONS=$(gh api "users/$OWNER/packages/container/$PACKAGE_NAME/versions" --jq '.[] | {id: .id, created_at: .created_at, tags: .metadata.container.tags}' || true)
+          
+          if [ -z "$VERSIONS" ]; then
+            echo "No versions found for package. Nothing to clean up."
+            exit 0
+          fi
+          
+          CUTOFF_DATE=$(date -d "60 days ago" -u +"%Y-%m-%dT%H:%M:%SZ")
+          echo "Cutoff date: $CUTOFF_DATE"
+          
+          # Use jq to filter for versions that are older than the cutoff date AND do not have the 'production-smb' tag.
+          OLD_VERSIONS_TO_DELETE=$(echo "$VERSIONS" | jq --arg cutoff_date "$CUTOFF_DATE" '[.[] | select(.created_at < $cutoff_date and (any(.tags[]; . == "production-smb") | not))]')
+          
+          if [ -z "$OLD_VERSIONS_TO_DELETE" ] || [ "$(echo "$OLD_VERSIONS_TO_DELETE" | jq 'length')" -eq 0 ]; then
+            echo "No old versions to delete."
+            exit 0
+          fi
+
+          echo "The following old versions will be deleted:"
+          echo "$OLD_VERSIONS_TO_DELETE" | jq .
+          
+          # Loop over the versions to delete and delete them one by one.
+          echo "$OLD_VERSIONS_TO_DELETE" | jq -r '.[].id' | while read -r VERSION_ID; do
+            echo "Deleting version with ID: $VERSION_ID"
+            gh api --method DELETE "users/$OWNER/packages/container/$PACKAGE_NAME/versions/$VERSION_ID" --silent
+          done
+          
+          echo "Cleanup complete."
