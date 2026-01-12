@@ -1,0 +1,43 @@
+name: Daily Build and Cleanup
+
+on:
+  schedule:
+    - cron: '0 2 * * *' # Runs at 2 AM UTC daily
+  workflow_dispatch: # Allows manual triggering
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build_and_cleanup:
+    name: Build Docker image and cleanup old ones
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Log in to the GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push Docker image
+        id: build_and_push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository }}:production-smb
+            ghcr.io/${{ github.repository }}:${{ github.sha }}
+
+      - name: Cleanup old images
+        uses: snok/container-retention-policy@v2
+        with:
+          image-names: ${{ github.event.repository.name }}
+          keep-days: 60
+          token: ${{ secrets.GITHUB_TOKEN }}
