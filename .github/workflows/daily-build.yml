@@ -25,21 +25,6 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Get current date for tagging
-        id: date
-        run: echo "IMAGE_DATE=$(date +'%d%m%Y')" >> $GITHUB_ENV
-
-      - name: Build and push Docker image
-        id: build_and_push
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          push: true
-          tags: |
-            ghcr.io/${{ github.repository }}:production-smb
-            ghcr.io/${{ github.repository }}:${{ github.sha }}
-            ghcr.io/${{ github.repository }}:production-smb-${{ env.IMAGE_DATE }}
-
       - name: Cleanup old container images
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -63,7 +48,7 @@ jobs:
           echo "Cutoff date: $CUTOFF_DATE"
           
           # Use jq to filter for versions that are older than the cutoff date AND do not have the 'production-smb' tag.
-          OLD_VERSIONS_TO_DELETE=$(echo "$VERSIONS" | jq --arg cutoff_date "$CUTOFF_DATE" '[.[] | select(.created_at < $cutoff_date and (any(.tags[]; . == "production-smb") | not))]')
+          OLD_VERSIONS_TO_DELETE=$(echo "$VERSIONS" | jq -s --arg cutoff_date "$CUTOFF_DATE" 'map(select(.created_at < $cutoff_date and (any(.tags[]; . == "production-smb") | not)))')
           
           if [ -z "$OLD_VERSIONS_TO_DELETE" ] || [ "$(echo "$OLD_VERSIONS_TO_DELETE" | jq 'length')" -eq 0 ]; then
             echo "No old versions to delete."
@@ -80,3 +65,18 @@ jobs:
           done
           
           echo "Cleanup complete."
+
+      - name: Get current date for tagging
+        id: date
+        run: echo "IMAGE_DATE=$(date +'%d%m%Y')" >> $GITHUB_ENV
+
+      - name: Build and push Docker image
+        id: build_and_push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository }}:production-smb
+            ghcr.io/${{ github.repository }}:${{ github.sha }}
+            ghcr.io/${{ github.repository }}:production-smb-${{ env.IMAGE_DATE }}
